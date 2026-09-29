@@ -1,0 +1,21 @@
+# Cấu hình máy cá nhân
+local.properties
+.idea/
+*.iml
+
+# Cache và kết quả build
+.gradle/
+.kotlin/
+**/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Khóa ký ứng dụng và bí mật
+*.jks
+*.keystore
+keystore.properties
+key.properties
+secrets.properties
+.env
+.env.*
