@@ -20,6 +20,17 @@
     <string name="home_recently_added_title">Thêm gần đây</string>
     <string name="home_no_books_added">Chưa có sách nào.</string>
     <string name="total_books_count">Tổng cộng %1$d cuốn sách</string>
+    <string name="see_all">Xem tất cả ›</string>
+    <string name="progress_unread">Chưa đọc</string>
+    <string name="added_recently_label">Mới thêm</string>
+
+    <!-- Category & Import -->
+    <string name="select_category_title">Chọn danh mục sách 📁</string>
+    <string name="new_category_placeholder">Hoặc nhập danh mục mới (ví dụ: Truyện chiến tranh)…</string>
+    <string name="category_all">Tất cả</string>
+    <string name="confirm_import_btn">Nhập %1$d sách</string>
+    <string name="category_uncategorized">Chưa phân loại</string>
+    <string name="filter_by_category">Danh mục</string>
 
     <!-- Notes -->
     <string name="notes_title">Ghi chú</string>
@@ -41,6 +52,10 @@
     <string name="search_placeholder">Tìm tên sách, tác giả…</string>
     <string name="reading_now">ĐANG ĐỌC</string>
     <string name="reading_stats_summary">%1$d%% · %2$d phút đã đọc</string>
+    <string name="reading_progress_fmt">%1$d%% · %2$d phút đã đọc</string>
+    <string name="reading_completed">Đã xong ✓</string>
+    <string name="view_mode_grid">Lưới</string>
+    <string name="view_mode_list">Danh sách</string>
     <string name="trash_empty">Thùng rác trống.</string>
     <string name="library_empty">Chưa có sách nào.\nBấm “Nhập sách” để thêm EPUB / PDF.</string>
     <string name="edit_author_label">Tác giả / bộ sách</string>
@@ -66,6 +81,21 @@
     <string name="add_bookmark_button">+ Đánh dấu</string>
     <string name="no_bookmarks_in_book">Chưa có trang đánh dấu nào ở sách này.</string>
     <string name="bookmark_added_toast">Đã lưu trang đánh dấu 🔖</string>
+    <string name="reader_option_toc">Mục lục</string>
+    <string name="reader_option_notes">Ghi chú</string>
+    <string name="reader_option_bookmark">Dấu trang</string>
+    <string name="reader_option_theme">Giao diện</string>
+    <string name="reader_option_settings">Cài đặt</string>
+    <string name="reader_options_btn">Tùy chọn</string>
+    <string name="tts_started">Đang đọc thoại 🎧...</string>
+    <string name="tts_stopped">Đã dừng đọc thoại ⏹️</string>
+    <string name="tts_not_ready">Đang khởi tạo giọng đọc...</string>
+    <string name="tts_dialog_title">Chọn giọng đọc thoại 🎧</string>
+    <string name="tts_voice_female">Giọng Nữ 👩</string>
+    <string name="tts_voice_male">Giọng Nam 👨</string>
+    <string name="tts_voice_system">Mặc định hệ thống 🌐</string>
+    <string name="tts_speed_label">Tốc độ đọc</string>
+    <string name="tts_start_btn">▶️ Bắt đầu đọc</string>
     <string name="img_option">Ảnh</string>
     <string name="img_hide">Ẩn</string>
     <string name="img_compact">Gọn</string>
@@ -92,7 +122,7 @@
     <string name="font_mono">Máy đánh chữ (Mono)</string>
     <string name="font_casual">Mềm mại (Casual)</string>
     <string name="font_cursive">Nghệ thuật (Cursive)</string>
-    <string name="layout_options_title">Trình bày trang sách</string>
+    <string name="layout_options_title">Trình trình bày trang sách</string>
     <string name="font_size_label">Cỡ chữ</string>
     <string name="line_spacing_label">Giãn dòng</string>
     <string name="margin_label">Lề trang</string>

@@ -20,6 +20,17 @@
     <string name="home_recently_added_title">Recently Added</string>
     <string name="home_no_books_added">No books yet.</string>
     <string name="total_books_count">Total %1$d books</string>
+    <string name="see_all">See all ›</string>
+    <string name="progress_unread">Unread</string>
+    <string name="added_recently_label">Just added</string>
+
+    <!-- Category & Import -->
+    <string name="select_category_title">Select Book Category 📁</string>
+    <string name="new_category_placeholder">Or enter new category (e.g. War Fiction)…</string>
+    <string name="category_all">All</string>
+    <string name="confirm_import_btn">Import %1$d books</string>
+    <string name="category_uncategorized">Uncategorized</string>
+    <string name="filter_by_category">Category</string>
 
     <!-- Notes -->
     <string name="notes_title">Notes</string>
@@ -41,6 +52,10 @@
     <string name="search_placeholder">Search title, author…</string>
     <string name="reading_now">READING NOW</string>
     <string name="reading_stats_summary">%1$d%% · %2$d mins read</string>
+    <string name="reading_progress_fmt">%1$d%% · %2$d mins read</string>
+    <string name="reading_completed">Completed ✓</string>
+    <string name="view_mode_grid">Grid</string>
+    <string name="view_mode_list">List</string>
     <string name="trash_empty">Trash is empty.</string>
     <string name="library_empty">No books available.\nTap “Import Book” to add EPUB / PDF.</string>
     <string name="edit_author_label">Author / series</string>
@@ -66,6 +81,21 @@
     <string name="add_bookmark_button">+ Bookmark</string>
     <string name="no_bookmarks_in_book">No bookmarks in this book.</string>
     <string name="bookmark_added_toast">Bookmark saved 🔖</string>
+    <string name="reader_option_toc">Contents</string>
+    <string name="reader_option_notes">Notes</string>
+    <string name="reader_option_bookmark">Bookmark</string>
+    <string name="reader_option_theme">Theme</string>
+    <string name="reader_option_settings">Settings</string>
+    <string name="reader_options_btn">Options</string>
+    <string name="tts_started">Reading aloud 🎧...</string>
+    <string name="tts_stopped">Audio stopped ⏹️</string>
+    <string name="tts_not_ready">Initializing speech engine...</string>
+    <string name="tts_dialog_title">Select Audio Voice 🎧</string>
+    <string name="tts_voice_female">Female Voice 👩</string>
+    <string name="tts_voice_male">Male Voice 👨</string>
+    <string name="tts_voice_system">System Default 🌐</string>
+    <string name="tts_speed_label">Speech Speed</string>
+    <string name="tts_start_btn">▶️ Start Reading</string>
     <string name="img_option">Images</string>
     <string name="img_hide">Hide</string>
     <string name="img_compact">Compact</string>

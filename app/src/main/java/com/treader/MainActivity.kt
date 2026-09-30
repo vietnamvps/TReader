@@ -2,6 +2,7 @@
 package com.treader
 
 import android.content.res.Configuration
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -10,7 +11,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -19,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.treader.ui.home.Home
 import com.treader.ui.library.CoverCache
@@ -74,19 +79,90 @@ fun App(s: Store) {
     val ctx = LocalContext.current; val sc = rememberCoroutineScope()
     var importing by remember { mutableStateOf<ImportProgress?>(null) }
     var importMsg by remember { mutableStateOf<String?>(null) }
+    var pendingUris by remember { mutableStateOf<List<Uri>?>(null) }
+    var selectedTag by remember { mutableStateOf("") }
+    var newTagText by remember { mutableStateOf("") }
+
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { us ->
-        if (us.isNotEmpty()) sc.launch {
-            var dup = 0
-            us.forEachIndexed { i, u ->
-                importing = ImportProgress(us.size, i, nameOf(ctx, u), 0f)
-                if (importBook(s, ctx, u) { f -> importing = importing?.copy(frac = f) } == ImportOutcome.DUPLICATE) dup++
-            }
-            importing = null
-            if (dup > 0) {
-                importMsg = if (dup == 1) ctx.getString(R.string.skipped_duplicate_books_one) else ctx.getString(R.string.skipped_duplicate_books_many, dup)
-                delay(2500); importMsg = null
-            }
+        if (us.isNotEmpty()) {
+            pendingUris = us
+            selectedTag = ""
+            newTagText = ""
         }
+    }
+
+    pendingUris?.let { us ->
+        val existingTags = s.books.map { it.tag }.filter { it.isNotBlank() }.distinct()
+        AlertDialog(
+            onDismissRequest = { pendingUris = null },
+            title = { Text(stringResource(R.string.select_category_title), fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (existingTags.isNotEmpty()) {
+                        Text(stringResource(R.string.filter_by_category), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilterChip(
+                                selected = selectedTag.isEmpty() && newTagText.isBlank(),
+                                onClick = { selectedTag = ""; newTagText = "" },
+                                label = { Text(stringResource(R.string.category_uncategorized)) },
+                                shape = RoundedCornerShape(20.dp)
+                            )
+                            existingTags.forEach { t ->
+                                FilterChip(
+                                    selected = selectedTag == t && newTagText.isBlank(),
+                                    onClick = { selectedTag = t; newTagText = "" },
+                                    label = { Text(t) },
+                                    shape = RoundedCornerShape(20.dp)
+                                )
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = newTagText,
+                        onValueChange = { newTagText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text(stringResource(R.string.new_category_placeholder)) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val finalTag = newTagText.trim().ifEmpty { selectedTag }
+                        val targetUris = us
+                        pendingUris = null
+                        sc.launch {
+                            var dup = 0
+                            targetUris.forEachIndexed { i, u ->
+                                importing = ImportProgress(targetUris.size, i, nameOf(ctx, u), 0f)
+                                if (importBook(s, ctx, u, categoryTag = finalTag) { f -> importing = importing?.copy(frac = f) } == ImportOutcome.DUPLICATE) dup++
+                            }
+                            importing = null
+                            if (dup > 0) {
+                                importMsg = if (dup == 1) ctx.getString(R.string.skipped_duplicate_books_one) else ctx.getString(R.string.skipped_duplicate_books_many, dup)
+                                delay(2500)
+                                importMsg = null
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Text(stringResource(R.string.confirm_import_btn, us.size))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingUris = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
     }
     fun doImport() = pick.launch(arrayOf("application/epub+zip", "application/pdf"))
     fun goLib(f: LibFilter) { libFilter = f; tab = 1 }

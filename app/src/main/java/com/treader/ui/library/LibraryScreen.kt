@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.treader.Book
 import com.treader.Epub
 import com.treader.LibFilter
@@ -40,7 +41,6 @@ import com.treader.md5
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.security.MessageDigest
 import java.util.UUID
 
 data class ImportProgress(val total: Int, val done: Int, val name: String, val frac: Float)
@@ -66,7 +66,7 @@ fun nameOf(c: Context, u: Uri): String = c.contentResolver.query(u, null, null, 
     if (it.moveToFirst()) it.getString(it.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)) else null
 } ?: "book"
 
-suspend fun importBook(s: Store, c: Context, u: Uri, onProgress: (Float) -> Unit = {}): ImportOutcome {
+suspend fun importBook(s: Store, c: Context, u: Uri, categoryTag: String = "", onProgress: (Float) -> Unit = {}): ImportOutcome {
     var dup = false
     val b = withContext(Dispatchers.IO) {
         runCatching {
@@ -99,6 +99,7 @@ suspend fun importBook(s: Store, c: Context, u: Uri, onProgress: (Float) -> Unit
             onProgress(1f)
             val hash = runCatching { md5(f) }.getOrDefault("")
             val unknownAuthor = c.getString(R.string.author_unknown)
+            val tagClean = categoryTag.trim()
             if (hash.isNotEmpty() && s.books.any { it.hash == hash }) {
                 f.delete(); dup = true; null
             } else {
@@ -106,10 +107,10 @@ suspend fun importBook(s: Store, c: Context, u: Uri, onProgress: (Float) -> Unit
                 if (pdf) {
                     val pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
                     val r = PdfRenderer(pfd); val n = r.pageCount; r.close(); pfd.close()
-                    Book(id, name.removeSuffix(".pdf"), unknownAuthor, "", f.path, "pdf", n, addedAt = now, hash = hash)
+                    Book(id, name.removeSuffix(".pdf"), unknownAuthor, tagClean, f.path, "pdf", n, addedAt = now, hash = hash)
                 } else {
                     val e = Epub(f)
-                    try { Book(id, e.meta("title") ?: name, e.meta("creator") ?: unknownAuthor, "", f.path, "epub", e.spine.size, addedAt = now, hash = hash) }
+                    try { Book(id, e.meta("title") ?: name, e.meta("creator") ?: unknownAuthor, tagClean, f.path, "epub", e.spine.size, addedAt = now, hash = hash) }
                     finally { e.zip.close() }
                 }
             }
@@ -122,7 +123,19 @@ suspend fun importBook(s: Store, c: Context, u: Uri, onProgress: (Float) -> Unit
     }
 }
 
-fun Book.pr() = ((pos + off) / maxOf(n, 1)).coerceIn(0f, 1f)
+fun Book.pr(): Float {
+    if (n <= 0) return 0f
+    val raw = (pos.toFloat() + off.coerceIn(0f, 1f)) / maxOf(n, 1)
+    if (pos >= n - 1 && off >= 0.8f) return 1.0f
+    if (raw >= 0.98f) return 1.0f
+    return raw.coerceIn(0f, 1f)
+}
+
+fun Book.prPercent(): Int {
+    val p = pr()
+    if (p >= 0.98f) return 100
+    return (p * 100).toInt()
+}
 
 object CoverCache {
     val c = object : LruCache<String, Bitmap>(6 * 1024) { override fun sizeOf(k: String, v: Bitmap) = v.byteCount / 1024 }
@@ -163,35 +176,68 @@ fun Cover(b: Book, m: Modifier) {
         if (value == null) value = withContext(Dispatchers.IO) { loadCover(ctx, b) }?.also { CoverCache.c.put(b.id, it) }
     }
     val cv = bmp
-    if (cv != null) { Image(cv.asImageBitmap(), null, m.clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop); return }
+    if (cv != null) {
+        Surface(
+            modifier = m,
+            shape = RoundedCornerShape(10.dp),
+            shadowElevation = 3.dp
+        ) {
+            Image(cv.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        }
+        return
+    }
     val h = ((b.title.hashCode() and 0x7fffffff) % 360).toFloat()
-    Box(m.clip(RoundedCornerShape(14.dp)).background(
-        Brush.linearGradient(listOf(Color.hsv(h, .55f, .78f), Color.hsv((h + 40) % 360, .7f, .5f)))
-    ).padding(12.dp)) {
-        Text(b.title, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 4,
-            overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-        Text(b.type.uppercase(), Modifier.align(Alignment.BottomStart), color = Color.White.copy(.75f),
-            style = MaterialTheme.typography.labelSmall)
+    Surface(
+        modifier = m,
+        shape = RoundedCornerShape(10.dp),
+        shadowElevation = 3.dp
+    ) {
+        Box(
+            Modifier
+                .background(Brush.linearGradient(listOf(Color.hsv(h, .55f, .78f), Color.hsv((h + 40) % 360, .7f, .5f))))
+                .padding(10.dp)
+        ) {
+            Text(
+                b.title,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.titleSmall
+            )
+            Text(
+                b.type.uppercase(),
+                Modifier.align(Alignment.BottomStart),
+                color = Color.White.copy(.8f),
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun Library(s: Store, filter: LibFilter, onOpen: (Book) -> Unit) {
-    var q by remember { mutableStateOf("") }; var tag by remember { mutableStateOf("") }
+    var q by remember { mutableStateOf("") }
+    var tag by remember { mutableStateOf("") }
+    var viewMode by remember { mutableStateOf("grid") }
     var edit by remember { mutableStateOf<Book?>(null) }
     var trashItem by remember { mutableStateOf<Book?>(null) }
-    val list by remember(filter) { derivedStateOf {
-        val pool = s.books.filter { book ->
-            if (filter == LibFilter.Trash) book.trashed else !book.trashed && (filter != LibFilter.Fav || book.fav)
+
+    val list by remember(filter) {
+        derivedStateOf {
+            val pool = s.books.filter { book ->
+                if (filter == LibFilter.Trash) book.trashed else !book.trashed && (filter != LibFilter.Fav || book.fav)
+            }
+            val f = pool.filter { (q.isBlank() || (it.title + it.author).contains(q, true)) && (tag.isBlank() || it.tag == tag) }
+            when (filter) {
+                LibFilter.RecentAdded -> f.sortedByDescending { it.addedAt }
+                LibFilter.Trash -> f.sortedByDescending { it.trashedAt }
+                else -> f.sortedByDescending { it.last }
+            }
         }
-        val f = pool.filter { (q.isBlank() || (it.title + it.author).contains(q, true)) && (tag.isBlank() || it.tag == tag) }
-        when (filter) {
-            LibFilter.RecentAdded -> f.sortedByDescending { it.addedAt }
-            LibFilter.Trash -> f.sortedByDescending { it.trashedAt }
-            else -> f.sortedByDescending { it.last }
-        }
-    } }
+    }
+
     val recent = if (filter == LibFilter.None) s.books.filter { !it.trashed }.maxByOrNull { it.last }
         ?.takeIf { it.last > 0 && q.isBlank() && tag.isBlank() } else null
     val tags = s.books.filter { !it.trashed }.map { it.tag }.filter { it.isNotBlank() }.distinct()
@@ -201,83 +247,359 @@ fun Library(s: Store, filter: LibFilter, onOpen: (Book) -> Unit) {
         LibFilter.Trash -> stringResource(R.string.title_trash)
         else -> stringResource(R.string.title_library)
     }
-    LazyVerticalGrid(GridCells.Adaptive(150.dp), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item(span = { GridItemSpan(maxLineSpan) }) { Column {
-            Text(title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-            Text(stringResource(R.string.books_count, list.size), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } }
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth(), placeholder = { Text(stringResource(R.string.search_placeholder)) },
-                singleLine = true, shape = RoundedCornerShape(28.dp))
-        }
-        if (tags.isNotEmpty() && filter != LibFilter.Trash) item(span = { GridItemSpan(maxLineSpan) }) {
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                tags.forEach { t -> FilterChip(tag == t, { tag = if (tag == t) "" else t }, { Text(t) }, shape = RoundedCornerShape(20.dp)) }
-            }
-        }
-        if (recent != null) item(span = { GridItemSpan(maxLineSpan) }) {
-            Card(Modifier.fillMaxWidth().clickable { onOpen(recent) }, colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Cover(recent, Modifier.width(92.dp).aspectRatio(0.7f))
-                    Column(Modifier.weight(1f).align(Alignment.CenterVertically), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(stringResource(R.string.reading_now), style = MaterialTheme.typography.labelSmall)
-                        Text(recent.title, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(recent.author, style = MaterialTheme.typography.bodySmall, maxLines = 1)
-                        LinearProgressIndicator({ recent.pr() }, Modifier.fillMaxWidth().clip(CircleShape))
-                        Text(stringResource(R.string.reading_stats_summary, (recent.pr() * 100).toInt(), (recent.sec / 60).toInt()), style = MaterialTheme.typography.labelSmall)
+
+    Column(Modifier.fillMaxSize()) {
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(105.dp),
+            contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Header: Title & Count
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.books_count, list.size), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        FilterChip(
+                            selected = viewMode == "grid",
+                            onClick = { viewMode = "grid" },
+                            label = { Text("⊞") }
+                        )
+                        FilterChip(
+                            selected = viewMode == "list",
+                            onClick = { viewMode = "list" },
+                            label = { Text("☰") }
+                        )
                     }
                 }
             }
-        }
-        if (list.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
-            Text(if (filter == LibFilter.Trash) stringResource(R.string.trash_empty) else stringResource(R.string.library_empty),
-                Modifier.fillMaxWidth().padding(40.dp), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        items(list, key = { it.id }) { b ->
-            if (filter == LibFilter.Trash) Column(Modifier.clickable { trashItem = b }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Cover(b, Modifier.fillMaxWidth().aspectRatio(0.7f).graphicsLayer { alpha = 0.55f })
-                Text(b.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
-            } else Column(Modifier.combinedClickable(onClick = { onOpen(b) }, onLongClick = { edit = b }), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Box {
-                    Cover(b, Modifier.fillMaxWidth().aspectRatio(0.7f))
-                    IconButton({ s.update(b.copy(fav = !b.fav)) }, Modifier.align(Alignment.TopEnd).size(32.dp)) {
-                        Text(if (b.fav) "♥" else "♡", color = if (b.fav) Color(0xFFE0546A) else Color.White, style = MaterialTheme.typography.titleMedium)
+
+            // Search Bar
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                OutlinedTextField(
+                    value = q,
+                    onValueChange = { q = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text(stringResource(R.string.search_placeholder)) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(24.dp)
+                )
+            }
+
+            // Category Filter Chips
+            if (filter != LibFilter.Trash) item(span = { GridItemSpan(maxLineSpan) }) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FilterChip(
+                        selected = tag.isEmpty(),
+                        onClick = { tag = "" },
+                        label = { Text(stringResource(R.string.category_all)) },
+                        shape = RoundedCornerShape(20.dp)
+                    )
+                    tags.forEach { t ->
+                        FilterChip(
+                            selected = tag == t,
+                            onClick = { tag = if (tag == t) "" else t },
+                            label = { Text(t) },
+                            shape = RoundedCornerShape(20.dp)
+                        )
                     }
                 }
-                Text(b.author + if (b.tag.isNotBlank()) " · #${b.tag}" else "", style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                LinearProgressIndicator({ b.pr() }, Modifier.fillMaxWidth().clip(CircleShape))
+            }
+
+            // "ĐANG ĐỌC" (Reading Now) Hero Card
+            if (recent != null) item(span = { GridItemSpan(maxLineSpan) }) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpen(recent) },
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                    elevation = CardDefaults.cardElevation(2.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Cover(recent, Modifier.width(76.dp).aspectRatio(0.68f))
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Text(
+                                    stringResource(R.string.reading_now),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                            Text(recent.title, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
+                            Text(recent.author, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+
+                            Spacer(modifier = Modifier.height(2.dp))
+                            LinearProgressIndicator(
+                                progress = { recent.pr() },
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape)
+                            )
+                            Text(
+                                stringResource(R.string.reading_progress_fmt, recent.prPercent(), (recent.sec / 60).toInt()),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Empty state
+            if (list.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+                Text(
+                    if (filter == LibFilter.Trash) stringResource(R.string.trash_empty) else stringResource(R.string.library_empty),
+                    Modifier.fillMaxWidth().padding(40.dp),
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // GRID VIEW ITEM (3 columns, compact, proportionate)
+            if (viewMode == "grid") {
+                items(list, key = { it.id }) { b ->
+                    if (filter == LibFilter.Trash) {
+                        Column(Modifier.clickable { trashItem = b }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Cover(b, Modifier.fillMaxWidth().aspectRatio(0.68f).graphicsLayer { alpha = 0.55f })
+                            Text(b.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.combinedClickable(onClick = { onOpen(b) }, onLongClick = { edit = b }),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box {
+                                Cover(b, Modifier.fillMaxWidth().aspectRatio(0.68f))
+                                Surface(
+                                    modifier = Modifier.align(Alignment.TopStart).padding(6.dp),
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color.Black.copy(alpha = 0.5f)
+                                ) {
+                                    Text(
+                                        b.type.uppercase(),
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 9.sp,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                                Surface(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(4.dp)
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .clickable { s.update(b.copy(fav = !b.fav)) },
+                                    color = Color.Black.copy(alpha = 0.35f)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            if (b.fav) "♥" else "♡",
+                                            color = if (b.fav) Color(0xFFE0546A) else Color.White,
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                b.title,
+                                maxLines = 2,
+                                minLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.height(38.dp)
+                            )
+                            Text(
+                                b.author,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                minLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.height(18.dp)
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.fillMaxWidth().height(20.dp)
+                            ) {
+                                LinearProgressIndicator(
+                                    progress = { b.pr() },
+                                    modifier = Modifier.weight(1f).height(5.dp).clip(CircleShape),
+                                    color = if (b.prPercent() >= 100) Color(0xFF388E3C) else MaterialTheme.colorScheme.primary,
+                                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                                )
+                                Text(
+                                    text = if (b.prPercent() == 0) stringResource(R.string.progress_unread)
+                                           else if (b.prPercent() >= 100) stringResource(R.string.reading_completed)
+                                           else "${b.prPercent()}%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 11.sp,
+                                    color = if (b.prPercent() > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                // LIST VIEW ITEMS (Full width row)
+                items(list, key = { it.id }, span = { GridItemSpan(maxLineSpan) }) { b ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .combinedClickable(onClick = { onOpen(b) }, onLongClick = { edit = b }),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Cover(b, Modifier.width(52.dp).aspectRatio(0.68f))
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(b.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
+                                Text(b.author, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    LinearProgressIndicator(
+                                        progress = { b.pr() },
+                                        modifier = Modifier.weight(1f).height(4.dp).clip(CircleShape),
+                                        color = if (b.prPercent() >= 100) Color(0xFF388E3C) else MaterialTheme.colorScheme.primary,
+                                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                    )
+                                    Text(
+                                        text = if (b.prPercent() == 0) stringResource(R.string.progress_unread)
+                                               else if (b.prPercent() >= 100) stringResource(R.string.reading_completed)
+                                               else "${b.prPercent()}%",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 11.sp,
+                                        color = if (b.prPercent() > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            IconButton(onClick = { s.update(b.copy(fav = !b.fav)) }) {
+                                Text(if (b.fav) "♥" else "♡", color = if (b.fav) Color(0xFFE0546A) else Color.Gray, style = MaterialTheme.typography.titleMedium)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
+
     edit?.let { b ->
-        var a by remember { mutableStateOf(b.author) }; var t by remember { mutableStateOf(b.tag) }
-        AlertDialog(onDismissRequest = { edit = null }, title = { Text(b.title, maxLines = 2) },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(a, { a = it }, label = { Text(stringResource(R.string.edit_author_label)) })
-                OutlinedTextField(t, { t = it }, label = { Text(stringResource(R.string.edit_tag_label)) })
-            } },
-            confirmButton = { TextButton({ s.update(b.copy(author = a, tag = t.trim())); edit = null }) { Text(stringResource(R.string.save)) } },
-            dismissButton = { TextButton({
-                s.update(b.copy(trashed = true, trashedAt = System.currentTimeMillis())); edit = null
-            }) { Text(stringResource(R.string.move_to_trash), color = MaterialTheme.colorScheme.error) } })
+        var a by remember { mutableStateOf(b.author) }
+        var t by remember { mutableStateOf(b.tag) }
+        val existingTags = remember { s.books.map { it.tag }.filter { it.isNotBlank() }.distinct() }
+
+        AlertDialog(
+            onDismissRequest = { edit = null },
+            title = { Text(b.title, maxLines = 2, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = a,
+                        onValueChange = { a = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.edit_author_label)) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                    OutlinedTextField(
+                        value = t,
+                        onValueChange = { t = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.edit_tag_label)) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                    if (existingTags.isNotEmpty()) {
+                        Text(
+                            stringResource(R.string.filter_by_category),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            existingTags.forEach { existing ->
+                                FilterChip(
+                                    selected = t == existing,
+                                    onClick = { t = if (t == existing) "" else existing },
+                                    label = { Text(existing) },
+                                    shape = RoundedCornerShape(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton({ s.update(b.copy(author = a.trim(), tag = t.trim())); edit = null }) { Text(stringResource(R.string.save)) } },
+            dismissButton = {
+                TextButton({
+                    s.update(b.copy(trashed = true, trashedAt = System.currentTimeMillis()))
+                    edit = null
+                }) { Text(stringResource(R.string.move_to_trash), color = MaterialTheme.colorScheme.error) }
+            }
+        )
     }
+
     trashItem?.let { b ->
         var confirmWipe by remember { mutableStateOf(false) }
-        if (!confirmWipe) AlertDialog(onDismissRequest = { trashItem = null }, title = { Text(b.title, maxLines = 2) },
+        if (!confirmWipe) AlertDialog(
+            onDismissRequest = { trashItem = null },
+            title = { Text(b.title, maxLines = 2) },
             text = { Text(stringResource(R.string.in_trash_message)) },
             confirmButton = { TextButton({ s.update(b.copy(trashed = false)); trashItem = null }) { Text(stringResource(R.string.restore)) } },
-            dismissButton = { TextButton({ confirmWipe = true }) { Text(stringResource(R.string.delete_permanently), color = MaterialTheme.colorScheme.error) } })
-        else AlertDialog(onDismissRequest = { trashItem = null }, title = { Text(stringResource(R.string.delete_book_title, b.title)) },
+            dismissButton = { TextButton({ confirmWipe = true }) { Text(stringResource(R.string.delete_permanently), color = MaterialTheme.colorScheme.error) } }
+        )
+        else AlertDialog(
+            onDismissRequest = { trashItem = null },
+            title = { Text(stringResource(R.string.delete_book_title, b.title)) },
             text = { Text(stringResource(R.string.delete_book_confirm)) },
-            confirmButton = { TextButton({
-                File(b.file).delete()
-                File(s.ctx.filesDir, "covers/${b.id}.jpg").delete(); File(s.ctx.filesDir, "covers/${b.id}.none").delete()
-                s.bookmarks.removeAll { it.bookId == b.id }
-                s.books.remove(b); s.save(); trashItem = null
-            }) { Text(stringResource(R.string.delete_permanently), color = MaterialTheme.colorScheme.error) } },
-            dismissButton = { TextButton({ trashItem = null }) { Text(stringResource(R.string.cancel)) } })
+            confirmButton = {
+                TextButton({
+                    File(b.file).delete()
+                    File(s.ctx.filesDir, "covers/${b.id}.jpg").delete()
+                    File(s.ctx.filesDir, "covers/${b.id}.none").delete()
+                    s.bookmarks.removeAll { it.bookId == b.id }
+                    s.books.remove(b)
+                    s.save()
+                    trashItem = null
+                }) { Text(stringResource(R.string.delete_permanently), color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton({ trashItem = null }) { Text(stringResource(R.string.cancel)) } }
+        )
     }
 }
