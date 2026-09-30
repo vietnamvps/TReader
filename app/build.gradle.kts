@@ -6,7 +6,7 @@ plugins {
 android {
     namespace = "com.treader"
     compileSdk = 34
-    defaultConfig { applicationId = "com.treader"; minSdk = 26; targetSdk = 34; versionCode = 2; versionName = "1.1" }
+    defaultConfig { applicationId = "com.treader"; minSdk = 26; targetSdk = 34; versionCode = 3; versionName = "1.2" }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }

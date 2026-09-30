@@ -72,9 +72,11 @@ import java.time.LocalDate
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import androidx.compose.ui.unit.sp
 
 object Active { @Volatile var on = true }
 object Flush { var fn: (() -> Unit)? = null }
+enum class LibFilter { None, Fav, RecentAdded, Trash }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(b: Bundle?) {
@@ -82,6 +84,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         Reminder.createChannel(this)
         val s = Store(this)
+        Thread { s.backfillHashes() }.start()   // tính mã băm bù cho sách nhập từ trước, để chống trùng áp dụng luôn cho sách cũ
         setContent { TTheme { Surface(Modifier.fillMaxSize()) { App(s) } } }
     }
     override fun onPause() { Active.on = false; Flush.fn?.invoke(); super.onPause() }
@@ -109,28 +112,165 @@ fun App(s: Store) {
     var openId by rememberSaveable { mutableStateOf<String?>(null) }
     var jumpNonce by rememberSaveable { mutableIntStateOf(0) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    var libFilter by rememberSaveable { mutableStateOf(LibFilter.None) }
     val ctx = LocalContext.current; val sc = rememberCoroutineScope()
     var importing by remember { mutableStateOf<ImportProgress?>(null) }
+    var importMsg by remember { mutableStateOf<String?>(null) }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { us ->
         if (us.isNotEmpty()) sc.launch {
+            var dup = 0
             us.forEachIndexed { i, u ->
                 importing = ImportProgress(us.size, i, nameOf(ctx, u), 0f)
-                importBook(s, ctx, u) { f -> importing = importing?.copy(frac = f) }
+                if (importBook(s, ctx, u) { f -> importing = importing?.copy(frac = f) } == ImportOutcome.DUPLICATE) dup++
             }
             importing = null
+            if (dup > 0) {
+                importMsg = if (dup == 1) "Đã bỏ qua 1 sách vì đã có sẵn trong thư viện" else "Đã bỏ qua $dup sách vì đã có sẵn trong thư viện"
+                delay(2500); importMsg = null
+            }
         }
     }
+    fun doImport() = pick.launch(arrayOf("application/epub+zip", "application/pdf"))
+    fun goLib(f: LibFilter) { libFilter = f; tab = 1 }
     BackHandler(openId != null) { openId = null }
     val o = openId?.let { id -> s.books.firstOrNull { it.id == id } }
     if (o != null) key(o.id, jumpNonce) { Reader(s, o, { jumpNonce++ }) { openId = null } }
     else Box(Modifier.fillMaxSize()) { Scaffold(
         bottomBar = { NavigationBar {
-            NavigationBarItem(tab == 0, { tab = 0 }, { Text("📚") }, label = { Text("Thư viện") })
-            NavigationBarItem(tab == 1, { tab = 1 }, { Text("📈") }, label = { Text("Thói quen") })
+            NavigationBarItem(tab == 0, { tab = 0 }, { Text("🏠") }, label = { Text("Trang chủ") })
+            NavigationBarItem(tab == 1, { tab = 1; libFilter = LibFilter.None }, { Text("📚") }, label = { Text("Giá sách") })
+            NavigationBarItem(tab == 2, { tab = 2 }, { Text("🔖") }, label = { Text("Ghi chú") })
+            NavigationBarItem(tab == 3, { tab = 3 }, { Text("⚙️") }, label = { Text("Cài đặt") })
         } },
-        floatingActionButton = { if (tab == 0) ExtendedFloatingActionButton({ pick.launch(arrayOf("application/epub+zip", "application/pdf")) }) { Text("＋  Nhập sách") } }
-    ) { pad -> Box(Modifier.padding(pad)) { if (tab == 0) Library(s) { openId = it.id } else Stats(s) } }
+        floatingActionButton = { if (tab == 0 || tab == 1) ExtendedFloatingActionButton({ doImport() }) { Text("＋  Nhập sách") } }
+    ) { pad -> Box(Modifier.padding(pad)) {
+        when (tab) {
+            0 -> Home(s, { openId = it.id }, { f -> goLib(f) }, { doImport() })
+            1 -> Library(s, libFilter) { openId = it.id }
+            2 -> Notes(s) { b, bm -> s.update(b.copy(pos = bm.pos, off = bm.off)); openId = b.id }
+            else -> Settings(s)
+        }
+    } }
         importing?.let { ip -> ImportBar(ip, Modifier.align(Alignment.BottomCenter).padding(16.dp, 0.dp, 16.dp, 88.dp)) }
+        importMsg?.let { msg -> Card(Modifier.align(Alignment.BottomCenter).padding(16.dp, 0.dp, 16.dp, 88.dp).fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+            elevation = CardDefaults.cardElevation(6.dp)) { Text(msg, Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium) } }
+    }
+}
+
+@Composable
+fun IconButtonText(icon: String, onClick: () -> Unit) {
+    IconButton(onClick, Modifier.size(40.dp)) { Text(icon, style = MaterialTheme.typography.titleMedium) }
+}
+
+@Composable
+fun QuickAction(icon: String, label: String, color: Color, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(74.dp).clickable(onClick = onClick)) {
+        Box(Modifier.size(52.dp).clip(CircleShape).background(color.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
+            Text(icon, color = color, style = MaterialTheme.typography.titleLarge)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, lineHeight = 14.sp)
+    }
+}
+
+// ---------- Trang chủ ----------
+@Composable
+fun Home(s: Store, onOpen: (Book) -> Unit, onFilter: (LibFilter) -> Unit, onImport: () -> Unit) {
+    val ctx = LocalContext.current
+    val active by remember { derivedStateOf { s.books.filter { !it.trashed } } }
+    val recent = active.maxByOrNull { it.last }?.takeIf { it.last > 0 }
+    val recentAdded = active.sortedByDescending { it.addedAt }.take(8)
+    var menu by remember { mutableStateOf(false) }
+    val exp = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { u ->
+        u?.let { ctx.contentResolver.openOutputStream(it)?.use { o -> o.write(s.json().toByteArray()) } }
+    }
+    val imp = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+        u?.let { runCatching { s.load(ctx.contentResolver.openInputStream(it)!!.bufferedReader().readText(), true); s.save() } }
+    }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp, 8.dp, 16.dp, 96.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Trang chủ", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Box {
+                IconButtonText("⋮") { menu = true }
+                DropdownMenu(menu, { menu = false }) {
+                    DropdownMenuItem(text = { Text("Xuất sao lưu") }, onClick = { menu = false; exp.launch("treader-backup.json") })
+                    DropdownMenuItem(text = { Text("Nhập sao lưu") }, onClick = { menu = false; imp.launch(arrayOf("application/json", "*/*")) })
+                }
+            }
+            IconButtonText("🔍") { onFilter(LibFilter.None) }
+            Spacer(Modifier.width(4.dp))
+            FilledTonalButton(onImport) { Text("＋ Thêm") }
+        }
+        Spacer(Modifier.height(14.dp))
+        if (recent != null) Card(Modifier.fillMaxWidth().clickable { onOpen(recent) }, colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+            Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Cover(recent, Modifier.width(92.dp).aspectRatio(0.7f))
+                Column(Modifier.weight(1f).align(Alignment.CenterVertically), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(recent.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(recent.author, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                    Text("Tiến độ đọc: ${(recent.pr() * 100).toInt()}%", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    LinearProgressIndicator({ recent.pr() }, Modifier.fillMaxWidth().clip(CircleShape))
+                }
+            }
+        } else Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+            Text("Chưa đọc cuốn nào. Nhập sách để bắt đầu.", Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.height(18.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            QuickAction("♡", "Mục yêu thích\ncủa tôi", Color(0xFFC2536E)) { onFilter(LibFilter.Fav) }
+            QuickAction("⤓", "Thêm gần đây", Color(0xFF2F8FB3)) { onFilter(LibFilter.RecentAdded) }
+            QuickAction("↗", "Đọc gần đây", Color(0xFF2FA372)) { onFilter(LibFilter.None) }
+            QuickAction("🗑", "Thùng rác\ncủa tôi", Color(0xFFB3902F)) { onFilter(LibFilter.Trash) }
+        }
+        Spacer(Modifier.height(18.dp))
+        Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+            Column(Modifier.padding(14.dp)) {
+                Text("Thêm gần đây", fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 10.dp))
+                if (recentAdded.isEmpty()) Text("Chưa có sách nào.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    recentAdded.forEach { b -> Column(Modifier.width(96.dp).clickable { onOpen(b) }) {
+                        Cover(b, Modifier.fillMaxWidth().aspectRatio(0.7f))
+                        Text(b.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(top = 4.dp))
+                    } }
+                }
+                Text("Tổng cộng ${active.size} cuốn sách", Modifier.padding(top = 10.dp).align(Alignment.CenterHorizontally),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+// ---------- Ghi chú (đánh dấu trang, gộp toàn bộ thư viện) ----------
+@Composable
+fun Notes(s: Store, onOpen: (Book, Bookmark) -> Unit) {
+    val marks by remember { derivedStateOf { s.bookmarks.sortedByDescending { it.time } } }
+    LazyColumn(contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp)) {
+        item { Text("Ghi chú", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 4.dp)) }
+        item { Text("Các trang đã đánh dấu trong toàn bộ sách", color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 10.dp)) }
+        if (marks.isEmpty()) item { Text("Chưa có trang đánh dấu nào. Khi đọc sách, bấm 🔖 để lưu lại.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 24.dp)) }
+        items(marks, key = { it.id }) { bm ->
+            val book = s.books.firstOrNull { it.id == bm.bookId && !it.trashed }
+            if (book != null) Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onOpen(book, bm) },
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+                Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Cover(book, Modifier.width(44.dp).aspectRatio(0.7f))
+                    Column(Modifier.weight(1f)) {
+                        Text(bm.label, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(book.title, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date(bm.time)),
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton({ s.bookmarks.remove(bm); s.save() }) { Text("✕") }
+                }
+            }
+        }
     }
 }
 
@@ -157,7 +297,17 @@ fun nameOf(c: Context, u: Uri): String = c.contentResolver.query(u, null, null, 
     if (it.moveToFirst()) it.getString(it.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)) else null
 } ?: "book"
 
-suspend fun importBook(s: Store, c: Context, u: Uri, onProgress: (Float) -> Unit = {}) {
+enum class ImportOutcome { ADDED, DUPLICATE, FAILED }
+
+fun md5(f: File): String {
+    val md = java.security.MessageDigest.getInstance("MD5")
+    f.inputStream().use { ins -> val buf = ByteArray(64 * 1024); var n: Int
+        while (ins.read(buf).also { n = it } >= 0) md.update(buf, 0, n) }
+    return md.digest().joinToString("") { "%02x".format(it) }
+}
+
+suspend fun importBook(s: Store, c: Context, u: Uri, onProgress: (Float) -> Unit = {}): ImportOutcome {
+    var dup = false
     val b = withContext(Dispatchers.IO) {
         runCatching {
             val cur = c.contentResolver.query(u, null, null, null, null)
@@ -188,18 +338,29 @@ suspend fun importBook(s: Store, c: Context, u: Uri, onProgress: (Float) -> Unit
                 }
             }
             onProgress(1f)
-            if (pdf) {
-                val pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
-                val r = PdfRenderer(pfd); val n = r.pageCount; r.close(); pfd.close()
-                Book(id, name.removeSuffix(".pdf"), "Không rõ", "", f.path, "pdf", n)
+            // So khớp nội dung file (không phải tên file) với sách đã có -> phát hiện đúng cả khi đổi tên file
+            val hash = runCatching { md5(f) }.getOrDefault("")
+            if (hash.isNotEmpty() && s.books.any { it.hash == hash }) {
+                f.delete(); dup = true; null
             } else {
-                val e = Epub(f)
-                try { Book(id, e.meta("title") ?: name, e.meta("creator") ?: "Không rõ", "", f.path, "epub", e.spine.size) }
-                finally { e.zip.close() }
+                val now = System.currentTimeMillis()
+                if (pdf) {
+                    val pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
+                    val r = PdfRenderer(pfd); val n = r.pageCount; r.close(); pfd.close()
+                    Book(id, name.removeSuffix(".pdf"), "Không rõ", "", f.path, "pdf", n, addedAt = now, hash = hash)
+                } else {
+                    val e = Epub(f)
+                    try { Book(id, e.meta("title") ?: name, e.meta("creator") ?: "Không rõ", "", f.path, "epub", e.spine.size, addedAt = now, hash = hash) }
+                    finally { e.zip.close() }
+                }
             }
         }.getOrNull()
     }
-    if (b != null) { s.books.add(b); s.save() }
+    return when {
+        b != null -> { s.books.add(b); s.save(); ImportOutcome.ADDED }
+        dup -> ImportOutcome.DUPLICATE
+        else -> ImportOutcome.FAILED
+    }
 }
 
 fun Book.pr() = ((pos + off) / maxOf(n, 1)).coerceIn(0f, 1f)
@@ -256,25 +417,36 @@ fun Cover(b: Book, m: Modifier) {
 }
 
 @Composable
-fun Library(s: Store, onOpen: (Book) -> Unit) {
+fun Library(s: Store, filter: LibFilter, onOpen: (Book) -> Unit) {
     var q by remember { mutableStateOf("") }; var tag by remember { mutableStateOf("") }
     var edit by remember { mutableStateOf<Book?>(null) }
-    val list by remember { derivedStateOf {
-        s.books.filter { (q.isBlank() || (it.title + it.author).contains(q, true)) && (tag.isBlank() || it.tag == tag) }
-            .sortedByDescending { it.last } } }
-    val recent = s.books.maxByOrNull { it.last }?.takeIf { it.last > 0 && q.isBlank() && tag.isBlank() }
-    val tags = s.books.map { it.tag }.filter { it.isNotBlank() }.distinct()
+    var trashItem by remember { mutableStateOf<Book?>(null) }   // sách trong thùng rác đang bấm giữ
+    val list by remember(filter) { derivedStateOf {
+        val pool = s.books.filter { book ->
+            if (filter == LibFilter.Trash) book.trashed else !book.trashed && (filter != LibFilter.Fav || book.fav)
+        }
+        val f = pool.filter { (q.isBlank() || (it.title + it.author).contains(q, true)) && (tag.isBlank() || it.tag == tag) }
+        when (filter) {
+            LibFilter.RecentAdded -> f.sortedByDescending { it.addedAt }
+            LibFilter.Trash -> f.sortedByDescending { it.trashedAt }
+            else -> f.sortedByDescending { it.last }
+        }
+    } }
+    val recent = if (filter == LibFilter.None) s.books.filter { !it.trashed }.maxByOrNull { it.last }
+        ?.takeIf { it.last > 0 && q.isBlank() && tag.isBlank() } else null
+    val tags = s.books.filter { !it.trashed }.map { it.tag }.filter { it.isNotBlank() }.distinct()
+    val title = when (filter) { LibFilter.Fav -> "Yêu thích"; LibFilter.RecentAdded -> "Thêm gần đây"; LibFilter.Trash -> "Thùng rác"; else -> "Giá sách" }
     LazyVerticalGrid(GridCells.Adaptive(150.dp), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item(span = { GridItemSpan(maxLineSpan) }) { Column {
-            Text("Thư viện", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-            Text("${s.books.size} cuốn sách", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+            Text("${list.size} cuốn sách", color = MaterialTheme.colorScheme.onSurfaceVariant)
         } }
         item(span = { GridItemSpan(maxLineSpan) }) {
             OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth(), placeholder = { Text("Tìm tên sách, tác giả…") },
                 singleLine = true, shape = RoundedCornerShape(28.dp))
         }
-        if (tags.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+        if (tags.isNotEmpty() && filter != LibFilter.Trash) item(span = { GridItemSpan(maxLineSpan) }) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 tags.forEach { t -> FilterChip(tag == t, { tag = if (tag == t) "" else t }, { Text(t) }, shape = RoundedCornerShape(20.dp)) }
             }
@@ -295,19 +467,26 @@ fun Library(s: Store, onOpen: (Book) -> Unit) {
             }
         }
         if (list.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
-            Text("Chưa có sách nào.\nBấm “Nhập sách” để thêm EPUB / PDF.", Modifier.fillMaxWidth().padding(40.dp),
-                textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (filter == LibFilter.Trash) "Thùng rác trống." else "Chưa có sách nào.\nBấm “Nhập sách” để thêm EPUB / PDF.",
+                Modifier.fillMaxWidth().padding(40.dp), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         items(list, key = { it.id }) { b ->
-            Column(Modifier.combinedClickable(onClick = { onOpen(b) }, onLongClick = { edit = b }), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Cover(b, Modifier.fillMaxWidth().aspectRatio(0.7f))
+            if (filter == LibFilter.Trash) Column(Modifier.clickable { trashItem = b }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Cover(b, Modifier.fillMaxWidth().aspectRatio(0.7f).graphicsLayer { alpha = 0.55f })
+                Text(b.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+            } else Column(Modifier.combinedClickable(onClick = { onOpen(b) }, onLongClick = { edit = b }), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box {
+                    Cover(b, Modifier.fillMaxWidth().aspectRatio(0.7f))
+                    IconButton({ s.update(b.copy(fav = !b.fav)) }, Modifier.align(Alignment.TopEnd).size(32.dp)) {
+                        Text(if (b.fav) "♥" else "♡", color = if (b.fav) Color(0xFFE0546A) else Color.White, style = MaterialTheme.typography.titleMedium)
+                    }
+                }
                 Text(b.author + if (b.tag.isNotBlank()) " · #${b.tag}" else "", style = MaterialTheme.typography.bodySmall,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 LinearProgressIndicator({ b.pr() }, Modifier.fillMaxWidth().clip(CircleShape))
             }
         }
     }
-    var toDelete by remember { mutableStateOf<Book?>(null) }
     edit?.let { b ->
         var a by remember { mutableStateOf(b.author) }; var t by remember { mutableStateOf(b.tag) }
         AlertDialog(onDismissRequest = { edit = null }, title = { Text(b.title, maxLines = 2) },
@@ -316,18 +495,25 @@ fun Library(s: Store, onOpen: (Book) -> Unit) {
                 OutlinedTextField(t, { t = it }, label = { Text("Thẻ (thể loại)") })
             } },
             confirmButton = { TextButton({ s.update(b.copy(author = a, tag = t.trim())); edit = null }) { Text("Lưu") } },
-            dismissButton = { TextButton({ toDelete = b; edit = null }) { Text("Xoá sách", color = MaterialTheme.colorScheme.error) } })
+            dismissButton = { TextButton({
+                s.update(b.copy(trashed = true, trashedAt = System.currentTimeMillis())); edit = null
+            }) { Text("Chuyển vào thùng rác", color = MaterialTheme.colorScheme.error) } })
     }
-    toDelete?.let { b ->
-        AlertDialog(onDismissRequest = { toDelete = null }, title = { Text("Xoá \"${b.title}\"?") },
+    trashItem?.let { b ->
+        var confirmWipe by remember { mutableStateOf(false) }
+        if (!confirmWipe) AlertDialog(onDismissRequest = { trashItem = null }, title = { Text(b.title, maxLines = 2) },
+            text = { Text("Sách này đang ở trong thùng rác.") },
+            confirmButton = { TextButton({ s.update(b.copy(trashed = false)); trashItem = null }) { Text("Khôi phục") } },
+            dismissButton = { TextButton({ confirmWipe = true }) { Text("Xoá vĩnh viễn", color = MaterialTheme.colorScheme.error) } })
+        else AlertDialog(onDismissRequest = { trashItem = null }, title = { Text("Xoá \"${b.title}\"?") },
             text = { Text("Sách, tiến độ đọc và trang đánh dấu của cuốn này sẽ bị xoá vĩnh viễn khỏi máy, không thể khôi phục.") },
             confirmButton = { TextButton({
                 File(b.file).delete()
                 File(s.ctx.filesDir, "covers/${b.id}.jpg").delete(); File(s.ctx.filesDir, "covers/${b.id}.none").delete()
                 s.bookmarks.removeAll { it.bookId == b.id }
-                s.books.remove(b); s.save(); toDelete = null
+                s.books.remove(b); s.save(); trashItem = null
             }) { Text("Xoá vĩnh viễn", color = MaterialTheme.colorScheme.error) } },
-            dismissButton = { TextButton({ toDelete = null }) { Text("Huỷ") } })
+            dismissButton = { TextButton({ trashItem = null }) { Text("Huỷ") } })
     }
 }
 
@@ -662,58 +848,131 @@ object PdfPath { var cur = "" }
 
 // ---------- Thói quen / sao lưu ----------
 @Composable
-fun Stats(s: Store) {
+fun SettingsRow(icon: String, color: Color, title: String, sub: String? = null, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(16.dp, 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(color.copy(alpha = .18f)), contentAlignment = Alignment.Center) {
+            Text(icon, style = MaterialTheme.typography.titleMedium)
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title)
+            if (sub != null) Text(sub, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Column(content = content)
+    }
+}
+
+@Composable
+fun SettingsPage(title: String, onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    BackHandler(onBack = onBack)
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.padding(4.dp, 4.dp, 16.dp, 0.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButtonText("←", onBack)
+            Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        }
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp, 8.dp, 16.dp, 24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
+    }
+}
+
+enum class SettingsScreen { Main, General, Appearance, Reading, Stats, About, Feedback }
+
+@Composable
+fun Settings(s: Store) {
+    var screen by rememberSaveable { mutableStateOf(SettingsScreen.Main) }
+    when (screen) {
+        SettingsScreen.General -> GeneralSettings(s) { screen = SettingsScreen.Main }
+        SettingsScreen.Appearance -> AppearanceSettings(s) { screen = SettingsScreen.Main }
+        SettingsScreen.Reading -> ReadingSettings(s) { screen = SettingsScreen.Main }
+        SettingsScreen.Stats -> StatsSettings(s) { screen = SettingsScreen.Main }
+        SettingsScreen.About -> AboutSettings { screen = SettingsScreen.Main }
+        SettingsScreen.Feedback -> FeedbackSettings { screen = SettingsScreen.Main }
+        SettingsScreen.Main -> SettingsMain(s) { screen = it }
+    }
+}
+
+@Composable
+fun SettingsMain(s: Store, onGo: (SettingsScreen) -> Unit) {
     val ctx = LocalContext.current
-    val exp = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { u ->
-        u?.let { ctx.contentResolver.openOutputStream(it)?.use { o -> o.write(s.json().toByteArray()) } }
+    var showBackup by remember { mutableStateOf(false) }
+    var confirmClearCache by remember { mutableStateOf(false) }
+    var confirmWipe1 by remember { mutableStateOf(false) }
+    var confirmWipe2 by remember { mutableStateOf(false) }
+    var toast by remember { mutableStateOf<String?>(null) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp, 8.dp, 16.dp, 40.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        Text("Cài đặt", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+        SettingsGroup {
+            SettingsRow("🔔", Color(0xFF4A90D9), "Cài đặt chung", "Nhắc đọc sách hằng ngày") { onGo(SettingsScreen.General) }
+            HorizontalDivider()
+            SettingsRow("📖", Color(0xFF3FA37A), "Tùy chọn đọc", "Font, cỡ chữ, giãn dòng, ảnh") { onGo(SettingsScreen.Reading) }
+            HorizontalDivider()
+            SettingsRow("🎨", Color(0xFF3FA37A), "Giao diện", "Nền sáng, tối, màu giấy") { onGo(SettingsScreen.Appearance) }
+            HorizontalDivider()
+            SettingsRow("📊", Color(0xFF3FA37A), "Thống kê đọc sách") { onGo(SettingsScreen.Stats) }
+        }
+        SettingsGroup {
+            SettingsRow("✉️", Color(0xFFD9A23F), "Gửi phản hồi") { onGo(SettingsScreen.Feedback) }
+            HorizontalDivider()
+            SettingsRow("ℹ️", Color(0xFFD9A23F), "Về TReader") { onGo(SettingsScreen.About) }
+        }
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            Text("Sao lưu và phục hồi", Modifier.clickable { showBackup = true }.padding(8.dp), color = MaterialTheme.colorScheme.primary)
+            Text("Xoá bộ nhớ đệm tạm thời", Modifier.clickable { confirmClearCache = true }.padding(8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Xoá toàn bộ dữ liệu", Modifier.clickable { confirmWipe1 = true }.padding(8.dp), color = MaterialTheme.colorScheme.error)
+        }
     }
-    val imp = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
-        u?.let { runCatching { s.load(ctx.contentResolver.openInputStream(it)!!.bufferedReader().readText(), true); s.save() } }
+    if (showBackup) {
+        val exp = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { u ->
+            u?.let { ctx.contentResolver.openOutputStream(it)?.use { o -> o.write(s.json().toByteArray()) } }; showBackup = false
+        }
+        val imp = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+            u?.let { runCatching { s.load(ctx.contentResolver.openInputStream(it)!!.bufferedReader().readText(), true); s.save() } }; showBackup = false
+        }
+        AlertDialog(onDismissRequest = { showBackup = false }, title = { Text("Sao lưu và phục hồi") },
+            text = { Text("Xuất ra file để chuyển sang máy khác, hoặc nhập lại một file đã xuất trước đó để khôi phục.") },
+            confirmButton = { TextButton({ exp.launch("treader-backup.json") }) { Text("Xuất sao lưu") } },
+            dismissButton = { TextButton({ imp.launch(arrayOf("application/json", "*/*")) }) { Text("Nhập sao lưu") } })
     }
-    val goal = s.prefs.goal
-    val min = ((s.daily[s.today()] ?: 0) / 60).toInt()
-    var d = LocalDate.now(); var streak = 0
-    while ((s.daily[d.toString()] ?: 0) >= goal * 60L) { streak++; d = d.minusDays(1) }
-    val days = (6 downTo 0).map { LocalDate.now().minusDays(it.toLong()) }
-    val vals = days.map { ((s.daily[it.toString()] ?: 0) / 60).toInt() }
-    val mx = maxOf(vals.max(), goal, 1)
-    val track = MaterialTheme.colorScheme.surfaceVariant; val prim = MaterialTheme.colorScheme.primary
-    val card = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
-    LazyColumn(contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item { Text("Thói quen đọc", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold) }
-        item { Card(Modifier.fillMaxWidth(), colors = card) { Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(Modifier.size(170.dp), contentAlignment = Alignment.Center) {
-                Canvas(Modifier.fillMaxSize().padding(10.dp)) {
-                    val st = Stroke(18.dp.toPx(), cap = StrokeCap.Round)
-                    drawArc(track, 0f, 360f, false, style = st, size = Size(size.width, size.height))
-                    drawArc(prim, -90f, 360f * (min.toFloat() / goal).coerceIn(0f, 1f), false, style = st, size = Size(size.width, size.height))
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("$min", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold)
-                    Text("/ $goal phút", style = MaterialTheme.typography.bodySmall)
-                }
+    if (confirmClearCache) AlertDialog(onDismissRequest = { confirmClearCache = false }, title = { Text("Xoá bộ nhớ đệm tạm thời?") },
+        text = { Text("Xoá ảnh bìa sách đã lưu tạm để tiết kiệm dung lượng. Sách, tiến độ đọc và ghi chú không bị ảnh hưởng. Ảnh bìa sẽ tự tạo lại khi mở sách lần sau.") },
+        confirmButton = { TextButton({
+            runCatching { File(s.ctx.filesDir, "covers").deleteRecursively() }; CoverCache.c.evictAll()
+            confirmClearCache = false; toast = "Đã xoá bộ nhớ đệm"
+        }) { Text("Xoá") } },
+        dismissButton = { TextButton({ confirmClearCache = false }) { Text("Huỷ") } })
+    if (confirmWipe1) AlertDialog(onDismissRequest = { confirmWipe1 = false }, title = { Text("Xoá toàn bộ dữ liệu?") },
+        text = { Text("Toàn bộ sách, tiến độ đọc, đánh dấu trang và thống kê sẽ bị xoá vĩnh viễn khỏi máy này. Hãy xuất sao lưu trước nếu mày chưa chắc chắn.") },
+        confirmButton = { TextButton({ confirmWipe1 = false; confirmWipe2 = true }) { Text("Tiếp tục", color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton({ confirmWipe1 = false }) { Text("Huỷ") } })
+    if (confirmWipe2) AlertDialog(onDismissRequest = { confirmWipe2 = false }, title = { Text("Chắc chắn xoá hết?") },
+        text = { Text("Đây là bước xác nhận cuối cùng. Không thể hoàn tác sau khi bấm Xoá hết.") },
+        confirmButton = { TextButton({ s.wipeAll(); Reminder.cancel(ctx); confirmWipe2 = false }) { Text("Xoá hết", color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton({ confirmWipe2 = false }) { Text("Huỷ") } })
+    toast?.let { msg -> LaunchedEffect(msg) { delay(2000); toast = null }
+        Box(Modifier.fillMaxSize().padding(bottom = 24.dp), contentAlignment = Alignment.BottomCenter) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest)) {
+                Text(msg, Modifier.padding(16.dp, 10.dp))
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton({ s.prefs = s.prefs.copy(goal = maxOf(5, goal - 5)); s.save() }) { Text("−5") }
-                Text("Mục tiêu/ngày")
-                OutlinedButton({ s.prefs = s.prefs.copy(goal = goal + 5); s.save() }) { Text("+5") }
-            }
-        } } }
-        item { Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Card(Modifier.weight(1f), colors = card) { Column(Modifier.padding(16.dp)) { Text("🔥 $streak", style = MaterialTheme.typography.headlineMedium); Text("ngày liên tiếp", style = MaterialTheme.typography.bodySmall) } }
-            Card(Modifier.weight(1f), colors = card) { Column(Modifier.padding(16.dp)) { Text("⏱ ${s.books.sumOf { it.sec } / 3600}h", style = MaterialTheme.typography.headlineMedium); Text("tổng thời gian", style = MaterialTheme.typography.bodySmall) } }
-        } }
-        item { Card(Modifier.fillMaxWidth(), colors = card) { Row(Modifier.fillMaxWidth().padding(16.dp).height(110.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Bottom) {
-            days.forEachIndexed { i, dt -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
-                Box(Modifier.width(24.dp).height((80f * vals[i] / mx).coerceAtLeast(3f).dp).clip(RoundedCornerShape(6.dp))
-                    .background(if (vals[i] >= goal) prim else prim.copy(.4f)))
-                Text(if (dt.dayOfWeek.value == 7) "CN" else "T${dt.dayOfWeek.value + 1}", style = MaterialTheme.typography.labelSmall)
-            } }
-        } } }
-        item { Card(Modifier.fillMaxWidth(), colors = card) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-                if (granted) { s.prefs = s.prefs.copy(remindOn = true); s.save(); Reminder.schedule(ctx, s.prefs.remindHour, s.prefs.remindMin) }
-            }
+        }
+    }
+}
+
+@Composable
+fun GeneralSettings(s: Store, onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    SettingsPage("Cài đặt chung", onBack) {
+        val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) { s.prefs = s.prefs.copy(remindOn = true); s.save(); Reminder.schedule(ctx, s.prefs.remindHour, s.prefs.remindMin) }
+        }
+        SettingsGroup { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column {
                     Text("Nhắc đọc sách hằng ngày", fontWeight = FontWeight.Medium)
@@ -732,12 +991,113 @@ fun Stats(s: Store) {
                     s.prefs = s.prefs.copy(remindHour = h, remindMin = m); s.save(); Reminder.schedule(ctx, h, m)
                 }, s.prefs.remindHour, s.prefs.remindMin, true).show()
             }) { Text("Đổi giờ nhắc") }
-        } } }
-        item { Text("Theo sách", style = MaterialTheme.typography.titleMedium) }
-        items(s.books.sortedByDescending { it.sec }.take(8)) { Text("${it.title} — ${it.sec / 60} phút", maxLines = 1, overflow = TextOverflow.Ellipsis) }
-        item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button({ exp.launch("treader-backup.json") }) { Text("Xuất sao lưu") }
-            OutlinedButton({ imp.launch(arrayOf("application/json", "*/*")) }) { Text("Nhập sao lưu") }
         } }
+    }
+}
+
+@Composable
+fun AppearanceSettings(s: Store, onBack: () -> Unit) {
+    SettingsPage("Giao diện", onBack) {
+        Text("Màu nền khi đọc sách", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            (0..2).forEach { i ->
+                val (bg, fg) = themeColors(i)
+                val name = listOf("Sáng", "Tối", "Giấy")[i]
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.size(52.dp).clip(CircleShape).background(bg)
+                        .border(if (s.prefs.theme == i) 3.dp else 1.dp, if (s.prefs.theme == i) MaterialTheme.colorScheme.primary else Color.Gray, CircleShape)
+                        .clickable { s.prefs = s.prefs.copy(theme = i); s.save() }, contentAlignment = Alignment.Center) { Text("A", color = fg, fontWeight = FontWeight.Bold) }
+                    Text(name, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ReadingSettings(s: Store, onBack: () -> Unit) {
+    SettingsPage("Tùy chọn đọc", onBack) {
+        val p = s.prefs
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("serif", "sans-serif", "monospace").forEach { f ->
+            FilterChip(p.font == f, { s.prefs = p.copy(font = f); s.save() }, { Text(f) }) } }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Ảnh"); listOf("Ẩn", "Gọn", "Đầy đủ").forEachIndexed { i, n -> FilterChip(p.img == i, { s.prefs = p.copy(img = i); s.save() }, { Text(n) }) } }
+        Text("Cỡ chữ ${p.size}"); Slider(p.size.toFloat(), { s.prefs = p.copy(size = it.toInt()) }, valueRange = 12f..32f, onValueChangeFinished = { s.save() })
+        Text("Giãn dòng %.1f".format(p.line)); Slider(p.line, { s.prefs = p.copy(line = it) }, valueRange = 1.2f..2.2f, onValueChangeFinished = { s.save() })
+        Text("Lề ${p.margin}"); Slider(p.margin.toFloat(), { s.prefs = p.copy(margin = it.toInt()) }, valueRange = 0f..40f, onValueChangeFinished = { s.save() })
+        Text("Áp dụng cho mọi sách đang đọc. Có thể chỉnh nhanh hơn ngay trong lúc đọc bằng nút Aa.",
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+fun StatsSettings(s: Store, onBack: () -> Unit) {
+    val goal = s.prefs.goal
+    val min = ((s.daily[s.today()] ?: 0) / 60).toInt()
+    var d = LocalDate.now(); var streak = 0
+    while ((s.daily[d.toString()] ?: 0) >= goal * 60L) { streak++; d = d.minusDays(1) }
+    val days = (6 downTo 0).map { LocalDate.now().minusDays(it.toLong()) }
+    val vals = days.map { ((s.daily[it.toString()] ?: 0) / 60).toInt() }
+    val mx = maxOf(vals.max(), goal, 1)
+    val track = MaterialTheme.colorScheme.surfaceVariant; val prim = MaterialTheme.colorScheme.primary
+    val card = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest)
+    SettingsPage("Thống kê đọc sách", onBack) {
+        Card(Modifier.fillMaxWidth(), colors = card) { Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.size(170.dp), contentAlignment = Alignment.Center) {
+                Canvas(Modifier.fillMaxSize().padding(10.dp)) {
+                    val st = Stroke(18.dp.toPx(), cap = StrokeCap.Round)
+                    drawArc(track, 0f, 360f, false, style = st, size = Size(size.width, size.height))
+                    drawArc(prim, -90f, 360f * (min.toFloat() / goal).coerceIn(0f, 1f), false, style = st, size = Size(size.width, size.height))
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("$min", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold)
+                    Text("/ $goal phút", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton({ s.prefs = s.prefs.copy(goal = maxOf(5, goal - 5)); s.save() }) { Text("−5") }
+                Text("Mục tiêu/ngày")
+                OutlinedButton({ s.prefs = s.prefs.copy(goal = goal + 5); s.save() }) { Text("+5") }
+            }
+        } }
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Card(Modifier.weight(1f), colors = card) { Column(Modifier.padding(16.dp)) { Text("🔥 $streak", style = MaterialTheme.typography.headlineMedium); Text("ngày liên tiếp", style = MaterialTheme.typography.bodySmall) } }
+            Card(Modifier.weight(1f), colors = card) { Column(Modifier.padding(16.dp)) { Text("⏱ ${s.books.sumOf { it.sec } / 3600}h", style = MaterialTheme.typography.headlineMedium); Text("tổng thời gian", style = MaterialTheme.typography.bodySmall) } }
+        }
+        Card(Modifier.fillMaxWidth(), colors = card) { Row(Modifier.fillMaxWidth().padding(16.dp).height(110.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Bottom) {
+            days.forEachIndexed { i, dt -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
+                Box(Modifier.width(24.dp).height((80f * vals[i] / mx).coerceAtLeast(3f).dp).clip(RoundedCornerShape(6.dp))
+                    .background(if (vals[i] >= goal) prim else prim.copy(.4f)))
+                Text(if (dt.dayOfWeek.value == 7) "CN" else "T${dt.dayOfWeek.value + 1}", style = MaterialTheme.typography.labelSmall)
+            } }
+        } }
+        Text("Theo sách", style = MaterialTheme.typography.titleMedium)
+        s.books.sortedByDescending { it.sec }.take(8).forEach { Text("${it.title} — ${it.sec / 60} phút", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+    }
+}
+
+@Composable
+fun AboutSettings(onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    val ver = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "1.0"
+    SettingsPage("Về TReader", onBack) {
+        Text("TReader", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text("Phiên bản $ver", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Ứng dụng đọc sách EPUB và PDF, chạy hoàn toàn trên máy — không quảng cáo, không máy chủ, mọi dữ liệu chỉ lưu trên thiết bị của bạn.",
+            style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+fun FeedbackSettings(onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    SettingsPage("Gửi phản hồi", onBack) {
+        Text("Mở ứng dụng email trên máy để viết góp ý, báo lỗi hoặc yêu cầu tính năng cho TReader.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Button({
+            val i = android.content.Intent(android.content.Intent.ACTION_SENDTO, Uri.parse("mailto:"))
+                .putExtra(android.content.Intent.EXTRA_SUBJECT, "Phản hồi về TReader")
+            runCatching { ctx.startActivity(i) }
+        }) { Text("Mở email") }
     }
 }

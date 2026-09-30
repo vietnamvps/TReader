@@ -10,17 +10,22 @@ import java.time.LocalDate
 data class Book(
     val id: String, val title: String, val author: String, val tag: String,
     val file: String, val type: String, val n: Int,
-    val pos: Int = 0, val off: Float = 0f, val last: Long = 0, val sec: Long = 0
+    val pos: Int = 0, val off: Float = 0f, val last: Long = 0, val sec: Long = 0,
+    val addedAt: Long = 0, val fav: Boolean = false, val trashed: Boolean = false, val trashedAt: Long = 0,
+    val hash: String = ""
 ) {
     fun j() = JSONObject().put("id", id).put("title", title).put("author", author).put("tag", tag)
         .put("file", file).put("type", type).put("n", n).put("pos", pos).put("off", off.toDouble())
-        .put("last", last).put("sec", sec)
+        .put("last", last).put("sec", sec).put("addedAt", addedAt).put("fav", fav)
+        .put("trashed", trashed).put("trashedAt", trashedAt).put("hash", hash)
 
     companion object {
         fun of(o: JSONObject) = Book(
             o.getString("id"), o.getString("title"), o.getString("author"), o.getString("tag"),
             o.getString("file"), o.getString("type"), o.getInt("n"), o.getInt("pos"),
-            o.getDouble("off").toFloat(), o.getLong("last"), o.getLong("sec")
+            o.getDouble("off").toFloat(), o.getLong("last"), o.getLong("sec"),
+            o.optLong("addedAt", o.getLong("last")), o.optBoolean("fav", false),
+            o.optBoolean("trashed", false), o.optLong("trashedAt", 0), o.optString("hash", "")
         )
     }
 }
@@ -69,7 +74,8 @@ class Store(val ctx: Context) {
             if (!merge) books.add(b)
             else if (k >= 0 && b.last > books[k].last)
                 books[k] = books[k].copy(pos = b.pos, off = b.off, last = b.last,
-                    sec = maxOf(b.sec, books[k].sec), tag = b.tag, author = b.author)
+                    sec = maxOf(b.sec, books[k].sec), tag = b.tag, author = b.author,
+                    fav = b.fav, trashed = b.trashed, trashedAt = b.trashedAt)
         }
         val d = o.getJSONObject("daily")
         d.keys().forEach { daily[it] = maxOf(d.getLong(it), daily[it] ?: 0) }
@@ -99,5 +105,26 @@ class Store(val ctx: Context) {
     }
     fun update(b: Book, persist: Boolean = true) {
         val i = books.indexOfFirst { it.id == b.id }; if (i >= 0) books[i] = b; if (persist) save()
+    }
+
+    /** Sách nhập từ trước khi có chống trùng thì chưa có mã băm -> tính bù 1 lần để việc chống trùng
+     *  cũng áp dụng được cho sách cũ, không chỉ sách nhập từ giờ trở đi. Gọi ở luồng nền. */
+    fun backfillHashes() {
+        var changed = false
+        books.toList().forEach { b ->
+            if (b.hash.isBlank()) {
+                val h = runCatching { md5(File(b.file)) }.getOrDefault("")
+                if (h.isNotEmpty()) { update(b.copy(hash = h), persist = false); changed = true }
+            }
+        }
+        if (changed) save()
+    }
+
+    /** Xoá toàn bộ dữ liệu: sách, tiến độ, đánh dấu, thống kê, cài đặt. Không thể hoàn tác. */
+    fun wipeAll() {
+        books.forEach { runCatching { File(it.file).delete() } }
+        runCatching { File(ctx.filesDir, "covers").deleteRecursively() }
+        books.clear(); bookmarks.clear(); daily.clear(); prefs = Prefs()
+        save()
     }
 }
