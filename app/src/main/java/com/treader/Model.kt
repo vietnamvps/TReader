@@ -1,11 +1,34 @@
 package com.treader
 
 import android.content.Context
+import android.content.res.Configuration
+import android.content.res.Resources
 import androidx.compose.runtime.*
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.security.MessageDigest
 import java.time.LocalDate
+import java.util.Locale
+
+fun Context.localizedContext(lang: String): Context {
+    val systemLocale = Resources.getSystem().configuration.locales.get(0)
+    val locale = when (lang) {
+        "vi" -> Locale("vi")
+        "en" -> Locale("en")
+        else -> systemLocale
+    }
+    val config = Configuration(resources.configuration)
+    config.setLocale(locale)
+    return createConfigurationContext(config)
+}
+
+fun md5(f: File): String {
+    val md = MessageDigest.getInstance("MD5")
+    f.inputStream().use { ins -> val buf = ByteArray(64 * 1024); var n: Int
+        while (ins.read(buf).also { n = it } >= 0) md.update(buf, 0, n) }
+    return md.digest().joinToString("") { "%02x".format(it) }
+}
 
 data class Book(
     val id: String, val title: String, val author: String, val tag: String,
@@ -33,7 +56,9 @@ data class Book(
 data class Prefs(
     val font: String = "serif", val size: Int = 18, val line: Float = 1.6f,
     val margin: Int = 16, val theme: Int = 0, val goal: Int = 20, val img: Int = 1,
-    val remindOn: Boolean = false, val remindHour: Int = 20, val remindMin: Int = 0
+    val remindOn: Boolean = false, val remindHour: Int = 20, val remindMin: Int = 0,
+    val lang: String = "system",
+    val appTheme: String = "system"
 )
 
 data class Bookmark(val id: String, val bookId: String, val pos: Int, val off: Float, val label: String, val time: Long) {
@@ -62,7 +87,8 @@ class Store(val ctx: Context) {
         return JSONObject().put("books", JSONArray(books.map { it.j() })).put("daily", d)
             .put("prefs", JSONObject().put("font", p.font).put("size", p.size).put("line", p.line.toDouble())
                 .put("margin", p.margin).put("theme", p.theme).put("goal", p.goal).put("img", p.img)
-                .put("remindOn", p.remindOn).put("remindHour", p.remindHour).put("remindMin", p.remindMin))
+                .put("remindOn", p.remindOn).put("remindHour", p.remindHour).put("remindMin", p.remindMin)
+                .put("lang", p.lang).put("appTheme", p.appTheme))
             .put("bookmarks", JSONArray(bookmarks.map { it.j() })).toString()
     }
 
@@ -90,7 +116,9 @@ class Store(val ctx: Context) {
             val p = o.getJSONObject("prefs")
             prefs = Prefs(p.getString("font"), p.getInt("size"), p.getDouble("line").toFloat(),
                 p.getInt("margin"), p.getInt("theme"), p.getInt("goal"), p.optInt("img", 1),
-                p.optBoolean("remindOn", false), p.optInt("remindHour", 20), p.optInt("remindMin", 0))
+                p.optBoolean("remindOn", false), p.optInt("remindHour", 20), p.optInt("remindMin", 0),
+                p.optString("lang", "system"),
+                p.optString("appTheme", "system"))
         }
     }
 

@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TLReader</string>
+    <string name="nav_home">Trang chủ</string>
+    <string name="nav_library">Giá sách</string>
+    <string name="nav_notes">Ghi chú</string>
+    <string name="nav_settings">Cài đặt</string>
+    <string name="import_book_button">＋  Nhập sách</string>
+    <string name="add_button">＋ Thêm</string>
+
+    <!-- Home -->
+    <string name="export_backup">Xuất sao lưu</string>
+    <string name="import_backup">Nhập sao lưu</string>
+    <string name="reading_progress">Tiến độ đọc: %1$d%%</string>
+    <string name="home_empty_reading">Chưa đọc cuốn nào. Nhập sách để bắt đầu.</string>
+    <string name="quick_favorites">Mục yêu thích\ncủa tôi</string>
+    <string name="quick_recent_added">Thêm gần đây</string>
+    <string name="quick_recent_read">Đọc gần đây</string>
+    <string name="quick_trash">Thùng rác\ncủa tôi</string>
+    <string name="home_recently_added_title">Thêm gần đây</string>
+    <string name="home_no_books_added">Chưa có sách nào.</string>
+    <string name="total_books_count">Tổng cộng %1$d cuốn sách</string>
+
+    <!-- Notes -->
+    <string name="notes_title">Ghi chú</string>
+    <string name="notes_subtitle">Các trang đã đánh dấu trong toàn bộ sách</string>
+    <string name="notes_empty">Chưa có trang đánh dấu nào. Khi đọc sách, bấm 🔖 để lưu lại.</string>
+
+    <!-- Import -->
+    <string name="importing_books_progress">Đang nhập sách %1$d/%2$d</string>
+    <string name="skipped_duplicate_books_one">Đã bỏ qua 1 sách vì đã có sẵn trong thư viện</string>
+    <string name="skipped_duplicate_books_many">Đã bỏ qua %1$d sách vì đã có sẵn trong thư viện</string>
+    <string name="author_unknown">Không rõ</string>
+
+    <!-- Library -->
+    <string name="title_favorites">Yêu thích</string>
+    <string name="title_recent_added">Thêm gần đây</string>
+    <string name="title_trash">Thùng rác</string>
+    <string name="title_library">Giá sách</string>
+    <string name="books_count">%1$d cuốn sách</string>
+    <string name="search_placeholder">Tìm tên sách, tác giả…</string>
+    <string name="reading_now">ĐANG ĐỌC</string>
+    <string name="reading_stats_summary">%1$d%% · %2$d phút đã đọc</string>
+    <string name="trash_empty">Thùng rác trống.</string>
+    <string name="library_empty">Chưa có sách nào.\nBấm “Nhập sách” để thêm EPUB / PDF.</string>
+    <string name="edit_author_label">Tác giả / bộ sách</string>
+    <string name="edit_tag_label">Thẻ (thể loại)</string>
+    <string name="save">Lưu</string>
+    <string name="move_to_trash">Chuyển vào thùng rác</string>
+    <string name="in_trash_message">Sách này đang ở trong thùng rác.</string>
+    <string name="restore">Khôi phục</string>
+    <string name="delete_permanently">Xoá vĩnh viễn</string>
+    <string name="delete_book_title">Xoá \"%1$s\"?</string>
+    <string name="delete_book_confirm">Sách, tiến độ đọc và trang đánh dấu của cuốn này sẽ bị xoá vĩnh viễn khỏi máy, không thể khôi phục.</string>
+    <string name="cancel">Huỷ</string>
+
+    <!-- Reader -->
+    <string name="chapter_x">Chương %1$d</string>
+    <string name="part_x">Phần %1$d</string>
+    <string name="page_x">Trang %1$d</string>
+    <string name="chapter_x_of_y">Chương %1$d / %2$d</string>
+    <string name="table_of_contents">Mục lục</string>
+    <string name="search_in_book">Tìm trong sách</string>
+    <string name="search_button">Tìm</string>
+    <string name="bookmarks_title">Đánh dấu trang</string>
+    <string name="add_bookmark_button">+ Đánh dấu</string>
+    <string name="no_bookmarks_in_book">Chưa có trang đánh dấu nào ở sách này.</string>
+    <string name="bookmark_added_toast">Đã lưu trang đánh dấu 🔖</string>
+    <string name="img_option">Ảnh</string>
+    <string name="img_hide">Ẩn</string>
+    <string name="img_compact">Gọn</string>
+    <string name="img_full">Đầy đủ</string>
+    <string name="font_size_x">Cỡ chữ %1$d</string>
+    <string name="line_spacing_x">Giãn dòng %1$.1f</string>
+    <string name="margin_x">Lề %1$d</string>
+    <string name="theme_light">Sáng</string>
+    <string name="theme_dark">Tối</string>
+    <string name="theme_sepia">Giấy vàng</string>
+    <string name="theme_scratched">Giấy xước</string>
+    <string name="theme_grainy">Giấy hạt</string>
+    <string name="theme_dark_sepia">Giấy tối</string>
+    <string name="theme_mint">Mát mắt</string>
+
+    <!-- Reading Options Extended -->
+    <string name="reading_preview_title">Xem trước trang sách</string>
+    <string name="reading_preview_sample">Một cuốn sách hay là một người bạn tốt. Hãy đắm mình vào không gian tri thức và thưởng thức từng trang sách.</string>
+    <string name="font_family_title">Phông chữ đọc sách</string>
+    <string name="font_serif">Có chân (Serif)</string>
+    <string name="font_sans">Không chân (Sans)</string>
+    <string name="font_medium">Nét đậm (Medium)</string>
+    <string name="font_condensed">Thon gọn (Condensed)</string>
+    <string name="font_mono">Máy đánh chữ (Mono)</string>
+    <string name="font_casual">Mềm mại (Casual)</string>
+    <string name="font_cursive">Nghệ thuật (Cursive)</string>
+    <string name="layout_options_title">Trình bày trang sách</string>
+    <string name="font_size_label">Cỡ chữ</string>
+    <string name="line_spacing_label">Giãn dòng</string>
+    <string name="margin_label">Lề trang</string>
+    <string name="images_title">Hình ảnh trong sách</string>
+
+    <!-- Reading Stats Dashboard Extended -->
+    <string name="stats_today_title">Hôm nay</string>
+    <string name="stats_goal_reached">🎉 Đã hoàn thành mục tiêu hôm nay!</string>
+    <string name="stats_goal_remaining">📖 Còn %1$d phút nữa để đạt mục tiêu</string>
+    <string name="stats_streak_title">Chuỗi đọc sách</string>
+    <string name="stats_total_time_title">Tổng thời gian</string>
+    <string name="stats_active_books_title">Sách thư viện</string>
+    <string name="stats_daily_avg_title">Trung bình/ngày</string>
+    <string name="stats_weekly_chart_title">Hoạt động 7 ngày qua</string>
+    <string name="stats_by_book_title">Thời gian đọc theo sách</string>
+    <string name="stats_top_books_empty">Chưa có dữ liệu đọc sách.</string>
+    <string name="stats_mins_fmt">%1$d phút</string>
+    <string name="stats_hours_mins_fmt">%1$dh %2$dm</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Cài đặt</string>
+    <string name="general_settings">Cài đặt chung</string>
+    <string name="general_settings_sub">Chủ đề ứng dụng, ngôn ngữ, nhắc đọc sách</string>
+    <string name="reading_options">Tùy chọn đọc</string>
+    <string name="reading_options_sub">Font, cỡ chữ, giãn dòng, ảnh</string>
+    <string name="appearance_settings">Giao diện</string>
+    <string name="appearance_settings_sub">Màu nền, chất liệu giấy khi đọc</string>
+    <string name="reading_stats">Thống kê đọc sách</string>
+    <string name="send_feedback">Gửi phản hồi</string>
+    <string name="about_app">Về TReader</string>
+    <string name="backup_restore">Sao lưu và phục hồi</string>
+    <string name="clear_cache">Xoá bộ nhớ đệm tạm thời</string>
+    <string name="wipe_data">Xoá toàn bộ dữ liệu</string>
+
+    <!-- Backup & Restore Dialog -->
+    <string name="backup_dialog_title">Sao lưu và phục hồi</string>
+    <string name="backup_dialog_desc">Xuất ra file để chuyển sang máy khác, hoặc nhập lại một file đã xuất trước đó để khôi phục.</string>
+    <string name="export_backup_btn">Xuất sao lưu</string>
+    <string name="import_backup_btn">Nhập sao lưu</string>
+
+    <!-- Clear Cache Dialog -->
+    <string name="clear_cache_dialog_title">Xoá bộ nhớ đệm tạm thời?</string>
+    <string name="clear_cache_dialog_desc">Xoá ảnh bìa sách đã lưu tạm để tiết kiệm dung lượng. Sách, tiến độ đọc và ghi chú không bị ảnh hưởng. Ảnh bìa sẽ tự tạo lại khi mở sách lần sau.</string>
+    <string name="clear_btn">Xoá</string>
+    <string name="cleared_cache_toast">Đã xoá bộ nhớ đệm</string>
+
+    <!-- Wipe Data Dialogs -->
+    <string name="wipe_data_dialog1_title">Xoá toàn bộ dữ liệu?</string>
+    <string name="wipe_data_dialog1_desc">Toàn bộ sách, tiến độ đọc, đánh dấu trang và thống kê sẽ bị xoá vĩnh viễn khỏi máy này. Hãy xuất sao lưu trước nếu bạn chưa chắc chắn.</string>
+    <string name="continue_btn">Tiếp tục</string>
+    <string name="wipe_data_dialog2_title">Chắc chắn xoá hết?</string>
+    <string name="wipe_data_dialog2_desc">Đây là bước xác nhận cuối cùng. Không thể hoàn tác sau khi bấm Xoá hết.</string>
+    <string name="wipe_all_btn">Xoá hết</string>
+
+    <!-- General Settings -->
+    <string name="app_theme_title">Giao diện ứng dụng</string>
+    <string name="app_theme_system">Theo hệ thống</string>
+    <string name="app_theme_light">Giao diện sáng</string>
+    <string name="app_theme_dark">Giao diện tối</string>
+    <string name="language">Ngôn ngữ</string>
+    <string name="lang_system">Theo hệ thống</string>
+    <string name="lang_vi">Tiếng Việt</string>
+    <string name="lang_en">English</string>
+    <string name="daily_reminder">Nhắc đọc sách hằng ngày</string>
+    <string name="at_time">Vào lúc %1$02d:%2$02d</string>
+    <string name="change_reminder_time">Đổi giờ nhắc</string>
+
+    <!-- Reading Options Settings -->
+    <string name="reading_options_hint">Áp dụng cho mọi sách đang đọc. Có thể chỉnh nhanh hơn ngay trong lúc đọc bằng nút Aa.</string>
+
+    <!-- Appearance Settings -->
+    <string name="bg_color_reading">Màu nền và chất liệu khi đọc sách</string>
+
+    <!-- Reading Stats -->
+    <string name="stats_title">Thống kê đọc sách</string>
+    <string name="minutes_unit">/ %1$d phút</string>
+    <string name="goal_per_day">Mục tiêu/ngày</string>
+    <string name="consecutive_days">ngày liên tiếp</string>
+    <string name="total_time">tổng thời gian</string>
+    <string name="hours_unit">%1$dh</string>
+    <string name="minutes_count">%1$d phút</string>
+    <string name="by_book">Theo sách</string>
+    <string name="sun">CN</string>
+    <string name="mon">T2</string>
+    <string name="tue">T3</string>
+    <string name="wed">T4</string>
+    <string name="thu">T5</string>
+    <string name="fri">T6</string>
+    <string name="sat">T7</string>
+
+    <!-- About & Feedback -->
+    <string name="about_title">Về TReader</string>
+    <string name="about_desc">Ứng dụng đọc sách EPUB và PDF, chạy hoàn toàn trên máy — không quảng cáo, không máy chủ, mọi dữ liệu chỉ lưu trên thiết bị của bạn.</string>
+    <string name="version_x">Phiên bản %1$s</string>
+    <string name="feedback_title">Gửi phản hồi</string>
+    <string name="feedback_desc">Mở ứng dụng email trên máy để viết góp ý, báo lỗi hoặc yêu cầu tính năng cho TReader.</string>
+    <string name="open_email">Mở email</string>
+    <string name="email_subject">Phản hồi về TReader</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_name">Nhắc đọc sách</string>
+    <string name="notification_title">Đến giờ đọc sách rồi 📖</string>
+    <string name="notification_text">Dành vài phút đọc tiếp cuốn sách của bạn nhé</string>
+</resources>

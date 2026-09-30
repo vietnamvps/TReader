@@ -19,7 +19,9 @@ object Reminder {
 
     fun createChannel(ctx: Context) {
         if (Build.VERSION.SDK_INT >= 26) {
-            val ch = NotificationChannel(CHANNEL, "Nhắc đọc sách", NotificationManager.IMPORTANCE_DEFAULT)
+            val s = Store(ctx)
+            val lctx = ctx.localizedContext(s.prefs.lang)
+            val ch = NotificationChannel(CHANNEL, lctx.getString(R.string.notification_channel_name), NotificationManager.IMPORTANCE_DEFAULT)
             ctx.getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }
     }
@@ -43,16 +45,17 @@ object Reminder {
 
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
+        val s = Store(ctx)
+        val lctx = ctx.localizedContext(s.prefs.lang)
         Reminder.createChannel(ctx)
         val open = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0))
         val nb = NotificationCompat.Builder(ctx, Reminder.CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_agenda)
-            .setContentTitle("Đến giờ đọc sách rồi 📖")
-            .setContentText("Dành vài phút đọc tiếp cuốn sách của bạn nhé")
+            .setContentTitle(lctx.getString(R.string.notification_title))
+            .setContentText(lctx.getString(R.string.notification_text))
             .setAutoCancel(true).setContentIntent(open).build()
         runCatching { NotificationManagerCompat.from(ctx).notify(1, nb) }
-        val s = Store(ctx)
         if (s.prefs.remindOn) Reminder.schedule(ctx, s.prefs.remindHour, s.prefs.remindMin)
     }
 }
